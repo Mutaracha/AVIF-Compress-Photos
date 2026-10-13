@@ -1,0 +1,125 @@
+Run AVIF Compressor.bat
+│
+└─► Main.ps1 (PowerShell 5.1)
+    │
+    ├─ [1] Mutex check (single instance)
+    │
+    ├─ [2] Load modules
+    │   ├─ UI.ps1
+    │   ├─ Settings.ps1
+    │   └─ Logging.ps1
+    │
+    ├─ [3] Load & validate config
+    │   ├─ Settings.psd1 (user config)
+    │   ├─ state.psd1 (runtime: FFmpegChecked, AvifencChecked, Gif2WebpChecked)
+    │   └─ Test-ProjectSettings (central validation)
+    │
+    ├─ [4] Dependency checks (unified model)
+    │   ├─ FFmpeg    → state.FFmpegChecked   → installers\ffmpeg-Install.ps1
+    │   ├─ avifenc   → state.AvifencChecked  → installers\avifenc-Install.ps1
+    │   ├─ gif2webp  → state.Gif2WebpChecked → installers\gif2webp-Install.ps1
+    │   └─ pwsh      → winget
+    │
+    ├─ [5] Input resolution
+    │   ├─ drag & drop / CLI argument
+    │   ├─ interactive folder input
+    │   └─ resume plan check
+    │
+    ├─ [6] Processing mode
+    │   ├─ Quick start (default, 4-sec auto-timeout)
+    │   └─ Custom settings
+    │
+    ├─ [7] File Analysis (pwsh)
+    │   │
+    │   └─► Analyze-Files.ps1 (#Requires -Version 7.0)
+    │       ├─ Load modules: Settings, UI, Logging, FileOps, ImageAnalysis.ps1
+    │       ├─ Collect files
+    │       ├─ Extension table (folder mode)
+    │       ├─ Pre-filter (size, exists, zero bytes)
+    │       │
+    │       ├─ Analysis stages (parallel)
+    │       │   ├─ Stage 1: .NET BitmapDecoder (JPG/JPEG/BMP/TIFF/PNG)
+    │       │   ├─ Stage 2: Binary parsers (GIF/WebP)
+    │       │   ├─ Stage 3: ffprobe fallback
+    │       │   └─ Stage 4: Decode test (suspicious → corrupt/_corrupt)
+    │       │
+    │       ├─ Output: metadata dictionary → temp file
+    │       └─ exit 0/1
+    │
+    ├─ [8] Plan Building (pwsh)
+    │   │
+    │   └─► Build-Encoding-Plan.ps1 (#Requires -Version 7.0)
+    │       ├─ Load metadata from analysis
+    │       ├─ Load modules: Settings, UI, Logging
+    │       │
+    │       ├─ Build typed tasks:
+    │       │   ├─ AvifDirectTask   (jpg, jpeg, png, y4m — avifenc only)
+    │       │   ├─ AvifPipeTask     (bmp, tiff, webp — ffmpeg | avifenc)
+    │       │   └─ Gif2WebpTask     (animated gif — gif2webp)
+    │       │
+    │       ├─ Assemble plan → %TEMP%\avif_encoding_plan.clixml (fixed name)
+    │       ├─ Optional: debug plan log
+    │       ├─ Plan summary UI
+    │       └─ exit 0/1
+    │
+    ├─ [9] Encoding (powershell 5.1)
+    │   │
+    │   └─► Compress-Photos.ps1
+    │       ├─ Load plan from %TEMP%\avif_encoding_plan.clixml (fixed name)
+    │       ├─ Delete plan file after loading
+    │       ├─ Load modules: Settings, UI, Logging, FileOps, Process, ImageEncoding.ps1
+    │       │
+    │       ├─ Execution header
+    │       │   ├─ Folder mode: "Press Q to stop"
+    │       │   └─ Single-file mode: no Q-stop
+    │       │
+    │       ├─ Producer-Consumer loop
+    │       │   ├─ Single fill point for running slots
+    │       │   ├─ Completion handler
+    │       │   ├─ Timeout handler
+    │       │   ├─ Progress update (periodic, not only on completion)
+    │       │   └─ Q-key handler (folder mode only)
+    │       │
+    │       ├─ Task execution by type:
+    │       │   ├─ AvifDirectTask:
+    │       │   │   primary:  avifenc "input" "output.ACtmp"
+    │       │   │   fallback: ffmpeg → temp → avifenc → output.ACtmp
+    │       │   │
+    │       │   ├─ AvifPipeTask:
+    │       │   │   primary:  ffmpeg ... | avifenc --stdin "output.ACtmp"
+    │       │   │   fallback: ffmpeg → temp → avifenc → output.ACtmp
+    │       │   │
+    │       │   └─ Gif2WebpTask:
+    │       │       primary:  gif2webp -mixed -q 80 -m 6 -min_size -mt "in" -o "out.ACtmp"
+    │       │       fallback: none (skip on failure)
+    │       │
+    │       ├─ Result registration
+    │       │   ├─ Success: rename .ACtmp → final, delete original (recycle)
+    │       │   ├─ Skip: output ≥ source → delete .ACtmp
+    │       │   └─ Failure: log, cleanup
+    │       │
+    │       ├─ Stop handling (folder mode)
+    │       │   └─ Save resume plan to source folder
+    │       │
+    │       ├─ Final summary
+    │       │   ├─ Counts: encoded, skipped, errors
+    │       │   ├─ Size: before, after, saved
+    │       │   ├─ Time
+    │       │   ├─ Detailed report (optional):
+    │       │   │   ├─ breakdown by format
+    │       │   │   ├─ top savings
+    │       │   │   └─ files where size increased
+    │       │   └─ Log summary + open prompt
+    │       │
+    │       ├─ Cleanup
+    │       │   ├─ .ACtmp sweep
+    │       │   ├─ stderr pool cleanup
+    │       │   ├─ temp directory cleanup
+    │       │   ├─ resume plan cleanup (if completed)
+    │       │   └─ cursor restore
+    │       │
+    │       └─ exit 0/1
+    │
+    ├─ [10] Relay exit code from Compress-Photos
+    ├─ [11] Final cleanup (mutex release automatic)
+    └─ exit

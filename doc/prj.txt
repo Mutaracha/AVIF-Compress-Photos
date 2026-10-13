@@ -1,0 +1,31 @@
+AVIF-Compressor/
+│
+├── Run AVIF Compressor.bat
+├── Settings.psd1                  # User config (quality, formats, behavior)
+│
+├── bin/
+│   ├── Main.ps1                  # Orchestrator (PS 5.1)
+│   ├── AnalyzeFiles.ps1          # File analysis (PS 7)
+│   ├── BuildEncodingPlan.ps1     # Plan builder (PS 7)
+│   ├── CompressPhotos.ps1        # Encoding executor (PS 5.1)
+│   │
+│   ├── Config.ps1                 # Config loader, validator, merger
+│   ├── UI.ps1                     # All UI
+│   ├── Logging.ps1                # All logging
+│   ├── FileOps.ps1                # File operations
+│   ├── Process.ps1                # Process management
+│   ├── ImageProbe.ps1             # Analysis for plan
+│   └── ImageEncoding.ps1          # Encoding only
+│
+├── installers/
+│   ├── avifenc-Install.ps1 
+│   ├── ffmpeg-Install.ps1
+│   ├── gif2webp-Install.ps1
+│   └── state.psd1                 # Runtime state
+│
+└── logs/
+    ├── encoding_*.log
+    ├── plan_*.log
+    ├── crash_*.log
+    ├── corrupt.log
+    └── warnings.log
