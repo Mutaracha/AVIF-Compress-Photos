@@ -549,6 +549,9 @@ function Write-PlanSummary {
     if ($SkipReasons -and $SkipReasons['UnsupportedMetadata'] -gt 0) {
         Write-BoxValueLine -Label '  No metadata:' -Value "$($SkipReasons['UnsupportedMetadata']) (→ warnings.log)" -ValueColor DarkYellow
     }
+    if ($SkipReasons -and $SkipReasons['Unreadable'] -gt 0) {
+        Write-BoxValueLine -Label '  Unreadable:' -Value "$($SkipReasons['Unreadable']) (not moved, → warnings.log)" -ValueColor DarkYellow
+    }
     Write-BoxEmpty
     Write-BoxFooter
 }

@@ -466,58 +466,97 @@ function Invoke-FfprobeFallback {
 function Test-CanDecode {
     <#
     .SYNOPSIS
-    Tests if files can be decoded by ffmpeg (1 frame decode test).
-    Returns decodable paths and corrupt file objects.
+    Classifies suspicious files with a one-frame ffmpeg decode test (H-3).
+    Decodable : ffmpeg ran, no format error (metadata problem only) -> warnings.log
+    Corrupt   : file opened, ffmpeg reported a format error         -> _corrupt/
+    Unreadable: locked, cloud-only (offline), ffmpeg did not run,
+                timeout or unknown message                         -> not moved, warnings.log
     #>
     param(
         [System.IO.FileInfo[]]$Files,
         [int]$ThrottleLimit = 4
     )
 
-    $decodable = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
-    $corrupt   = [System.Collections.Concurrent.ConcurrentBag[PSObject]]::new()
+    $decodable  = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
+    $corrupt    = [System.Collections.Concurrent.ConcurrentBag[PSObject]]::new()
+    $unreadable = [System.Collections.Concurrent.ConcurrentBag[PSObject]]::new()
 
     if ($null -eq $Files -or $Files.Count -eq 0) {
-        return [PSCustomObject]@{ Decodable = $decodable; Corrupt = $corrupt }
+        return [PSCustomObject]@{ Decodable = $decodable; Corrupt = $corrupt; Unreadable = $unreadable }
     }
 
     $Files | ForEach-Object -Parallel {
         $file   = $_
         $decBag = $using:decodable
         $corBag = $using:corrupt
+        $unrBag = $using:unreadable
 
-        $canDecode = $false
-        try {
-            $proc = New-Object System.Diagnostics.Process
-            $proc.StartInfo.FileName  = 'ffmpeg'
-            $proc.StartInfo.Arguments = "-hide_banner -v error -i `"$($file.FullName)`" -map 0:v:0 -frames:v 1 -f null -"
-            $proc.StartInfo.UseShellExecute = $false
-            $proc.StartInfo.RedirectStandardOutput = $false
-            $proc.StartInfo.RedirectStandardError  = $true
-            $proc.StartInfo.CreateNoWindow = $true
-            [void]$proc.Start()
+        $timeoutMs      = 60000
+        $corruptPattern = 'Invalid data found|Decode error|0 bytes left'
+        $offlineMask    = [System.IO.FileAttributes]::Offline -bor [System.IO.FileAttributes]::RecallOnDataAccess
 
-            $stderr = $proc.StandardError.ReadToEnd()
-            $proc.WaitForExit()
+        $status = ''
+        $detail = ''
 
-            if ($proc.ExitCode -eq 0) {
-                if ($stderr -notmatch 'Invalid data|Decode error|0 bytes left') {
-                    $canDecode = $true
+        if (($file.Attributes -band $offlineMask) -ne 0) {
+            $status = 'Unreadable'; $detail = 'cloud file is not downloaded (offline)'
+        }
+        else {
+            $canOpen = $true
+            try {
+                $fs = [System.IO.File]::OpenRead($file.FullName)
+                $fs.Dispose()
+            }
+            catch {
+                $canOpen = $false
+            }
+
+            if (-not $canOpen) {
+                $status = 'Unreadable'; $detail = 'file is locked or cannot be opened'
+            }
+            else {
+                $proc = New-Object System.Diagnostics.Process
+                $proc.StartInfo.FileName  = 'ffmpeg'
+                $proc.StartInfo.Arguments = "-hide_banner -v error -i `"$($file.FullName)`" -map 0:v:0 -frames:v 1 -f null -"
+                $proc.StartInfo.UseShellExecute        = $false
+                $proc.StartInfo.RedirectStandardOutput = $false
+                $proc.StartInfo.RedirectStandardError  = $true
+                $proc.StartInfo.CreateNoWindow         = $true
+                try {
+                    [void]$proc.Start()
+                    $errTask = $proc.StandardError.ReadToEndAsync()
+                    if (-not $proc.WaitForExit($timeoutMs)) {
+                        try { $proc.Kill() } catch { }
+                        $status = 'Unreadable'; $detail = 'ffmpeg timed out'
+                    }
+                    else {
+                        $stderr = [string]$errTask.Result
+                        if ($stderr -match $corruptPattern) {
+                            $status = 'Corrupt'
+                        }
+                        elseif ($proc.ExitCode -eq 0) {
+                            $status = 'Decodable'
+                        }
+                        else {
+                            $status = 'Unreadable'; $detail = "ffmpeg exit code $($proc.ExitCode), unknown message"
+                        }
+                    }
+                }
+                catch {
+                    $status = 'Unreadable'; $detail = 'ffmpeg did not start'
+                }
+                finally {
+                    try { $proc.Dispose() } catch { }
                 }
             }
         }
-        catch { }
-        finally {
-            if ($proc) { try { $proc.Dispose() } catch { } }
-        }
 
-        if ($canDecode) {
-            $decBag.Add($file.FullName)
-        }
-        else {
-            $corBag.Add($file)
+        switch ($status) {
+            'Decodable' { $decBag.Add($file.FullName) }
+            'Corrupt'   { $corBag.Add($file) }
+            default     { $unrBag.Add([PSCustomObject]@{ File = $file; Detail = $detail }) }
         }
     } -ThrottleLimit $ThrottleLimit
 
-    return [PSCustomObject]@{ Decodable = $decodable; Corrupt = $corrupt }
+    return [PSCustomObject]@{ Decodable = $decodable; Corrupt = $corrupt; Unreadable = $unreadable }
 }

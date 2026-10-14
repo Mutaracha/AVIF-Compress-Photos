@@ -265,6 +265,11 @@ if ($suspicious.Count -gt 0) {
     $corruptLog = Join-Path $logDir 'corrupt.log'
     $warnLog    = Join-Path $logDir 'warnings.log'
 
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+        Write-Host '     [!] ffmpeg was not found in PATH. Analysis stopped.' -ForegroundColor Red
+        exit 1
+    }
+
     $decodeResult = Test-CanDecode -Files $suspicious `
         -ThrottleLimit ([Math]::Min(4, $parallel.AnalysisThrottle))
 
@@ -272,6 +277,12 @@ if ($suspicious.Count -gt 0) {
     foreach ($filePath in $decodeResult.Decodable) {
         $skipReasons['UnsupportedMetadata']++
         Write-WarningLine -LogFile $warnLog -FilePath $filePath -Reason 'UnsupportedMetadata'
+    }
+
+    # Unreadable (locked, cloud-only, ffmpeg failure) → never moved, warning only
+    foreach ($item in $decodeResult.Unreadable) {
+        $skipReasons['Unreadable']++
+        Write-WarningLine -LogFile $warnLog -FilePath $item.File.FullName -Reason "Unreadable: $($item.Detail)"
     }
 
     # Corrupt → move to _corrupt
