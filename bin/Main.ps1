@@ -469,6 +469,13 @@ if (-not (Get-Command 'pwsh' -ErrorAction SilentlyContinue)) {
 # ═══════════════════════════════════════════════════════════════════════
 
 $Folder     = $null
+# SESSION FILES (H-5): remove leftovers of an interrupted run, return new SessionId
+function New-SessionId {
+    $tmp = [System.IO.Path]::GetTempPath()
+    Remove-Item -LiteralPath (Join-Path $tmp 'compress_analysis.clixml'), (Join-Path $tmp 'compress_plan.clixml') -Force -ErrorAction SilentlyContinue
+    return [guid]::NewGuid().ToString()
+}
+
 $SingleFile = $null
 $folderNote = $null
 
@@ -535,7 +542,9 @@ if ($SingleFile) {
     Show-Logo
 
     $analyzeScript = Join-Path $ScriptRoot 'AnalyzeFiles.ps1'
-    & pwsh -ExecutionPolicy Bypass -File $analyzeScript -SingleFile $SingleFile
+    $sessionId   = New-SessionId
+    $deleteValue = [int]$settings.General.DeleteOriginals
+    & pwsh -ExecutionPolicy Bypass -File $analyzeScript -SingleFile $SingleFile -DeleteOriginals $deleteValue -SessionId $sessionId
 
     if ($LASTEXITCODE -ne 0) {
         [Console]::CursorVisible = $true
@@ -549,7 +558,7 @@ if ($SingleFile) {
     }
 
     $buildScript = Join-Path $ScriptRoot 'BuildEncodingPlan.ps1'
-    & pwsh -ExecutionPolicy Bypass -File $buildScript
+    & pwsh -ExecutionPolicy Bypass -File $buildScript -SessionId $sessionId
 
     if ($LASTEXITCODE -ne 0) {
         [Console]::CursorVisible = $true
@@ -563,7 +572,7 @@ if ($SingleFile) {
     }
 
     $compress = Join-Path $ScriptRoot 'CompressPhotos.ps1'
-    & powershell -ExecutionPolicy Bypass -File $compress
+    & powershell -ExecutionPolicy Bypass -File $compress -SessionId $sessionId
     $compressExit = $LASTEXITCODE
 
     [Console]::CursorVisible = $true
@@ -650,7 +659,9 @@ while ($true) {
         Show-Logo
 
         $plan = Import-Clixml -LiteralPath $resumePlanPath
+        $sessionId = New-SessionId
         $plan.PlanFile = $planTempFile
+        $plan | Add-Member -NotePropertyName SessionId -NotePropertyValue $sessionId -Force
         $plan | Export-Clixml -LiteralPath $planTempFile -Force
 
         Write-BoxTitleOnly "Resuming $($plan.Tasks.Count) tasks..."
@@ -658,7 +669,7 @@ while ($true) {
         Start-Sleep -Seconds 2
 
         $compress = Join-Path $ScriptRoot 'CompressPhotos.ps1'
-        & powershell -ExecutionPolicy Bypass -File $compress
+        & powershell -ExecutionPolicy Bypass -File $compress -SessionId $sessionId
         $compressExit = $LASTEXITCODE
 
         [Console]::CursorVisible = $true
@@ -690,6 +701,8 @@ while ($true) {
 	Write-Host
 
 	$ExtraArgs = @()
+	# Quick start: value from Settings.psd1; Custom mode overrides it below
+	$deleteValue = [int]$settings.General.DeleteOriginals
 
 # ═══════════════════════════════════════════════════════════════════════
 # CUSTOM SETTINGS
@@ -792,7 +805,7 @@ while ($true) {
             -ValidValues @('0', '1') `
             -ErrorMessage 'Enter 1 or press Enter.'
 
-        $DelFlag = if ($dc -eq '0') { '-DeleteOriginal' } else { '' }
+        $deleteValue = if ($dc -eq '0') { 1 } else { 0 }
 
     # ── Write custom config ──
         $CustomCfg = Join-Path $env:TEMP 'avif_custom_config.txt'
@@ -806,7 +819,6 @@ while ($true) {
             "WEBP_CL=$CustomWebpCL"
         ) | Set-Content -LiteralPath $CustomCfg -Encoding UTF8
 
-        if ($DelFlag) { $ExtraArgs += $DelFlag }
         $ExtraArgs += '-CustomConfig'
         $ExtraArgs += $CustomCfg
     }
@@ -815,6 +827,7 @@ while ($true) {
 # ═══════════════════════════════════════════════════════════════════════
 
     # ── Stage 1: Analyze ──
+    $sessionId = New-SessionId
     Clear-Host
     [Console]::CursorVisible = $false
     Show-Logo
@@ -823,7 +836,7 @@ while ($true) {
     Write-Host
 
     $analyzeScript = Join-Path $ScriptRoot 'AnalyzeFiles.ps1'
-    $analyzeArgs = @('-ExecutionPolicy', 'Bypass', '-File', $analyzeScript, '-TargetFolder', $Folder) + $ExtraArgs
+    $analyzeArgs = @('-ExecutionPolicy', 'Bypass', '-File', $analyzeScript, '-TargetFolder', $Folder, '-DeleteOriginals', $deleteValue, '-SessionId', $sessionId) + $ExtraArgs
 
     & pwsh @analyzeArgs
 
@@ -840,7 +853,7 @@ while ($true) {
 
     # ── Stage 2: Build plan ──
     $buildScript = Join-Path $ScriptRoot 'BuildEncodingPlan.ps1'
-    & pwsh -ExecutionPolicy Bypass -File $buildScript
+    & pwsh -ExecutionPolicy Bypass -File $buildScript -SessionId $sessionId
 
     $planCheck = Join-Path ([System.IO.Path]::GetTempPath()) 'compress_plan.clixml'
 
@@ -859,7 +872,7 @@ while ($true) {
     Start-Sleep -Seconds 3
 
     $compress = Join-Path $ScriptRoot 'CompressPhotos.ps1'
-    & powershell -ExecutionPolicy Bypass -File $compress
+    & powershell -ExecutionPolicy Bypass -File $compress -SessionId $sessionId
     $compressExit = $LASTEXITCODE
 
     [Console]::CursorVisible = $true

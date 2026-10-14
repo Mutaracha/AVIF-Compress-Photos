@@ -352,3 +352,12 @@ ffmpeg -v error -i output.avif -vf alphaextract -frames:v 1 alpha_check.png
 - `installers/state.psd1` удалён из индекса (остаётся на диске, создаётся по умолчанию при отсутствии).
 
 ### H-4: отложено (по вашему решению).
+
+---
+
+## Статус реализации
+
+- **H-1: реализовано.** `AnalyzeFiles.ps1`: обязательный `-DeleteOriginals` (0/1), switch и чтение из `Settings` в анализаторе удалены. `Main.ps1`: значение передаётся явно в трёх путях — Quick и однофайловый (из `Settings.General.DeleteOriginals`), Custom («Yes» → 1, «No» → 0).
+- **H-5: реализовано.** `Main.ps1`: функция `New-SessionId` удаляет `compress_analysis.clixml` и `compress_plan.clixml` и возвращает новый GUID; вызывается перед анализом (folder и однофайловый режим) и при возобновлении. `AnalyzeFiles` пишет `SessionId`; `BuildEncodingPlan` и `CompressPhotos` принимают `-SessionId` и отказываются работать при несовпадении. При возобновлении `Main` присваивает план новому `SessionId`. Резюме в папке-источнике не изменено.
+- **Отклонение от H-5:** ранние выходы `AnalyzeFiles` без кандидатов (`Nothing found`, `No supported files`, `No files to process after filtering`) по-прежнему не пишут `clixml`. Это безопасно, потому что `Main` удаляет старый файл до анализа, и отсутствие файла означает «пусто». Запись при нулевом числе кандидатов в конце анализа уже есть.
+- **Не проверено:** в песочнице нет PowerShell. Тесты из разделов H-1 и H-5 нужно прогнать на Windows.

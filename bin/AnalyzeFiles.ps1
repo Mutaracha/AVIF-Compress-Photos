@@ -6,8 +6,11 @@
 param(
     [string]$TargetFolder = '',
     [string]$SingleFile   = '',
-    [switch]$DeleteOriginal,
-    [string]$CustomConfig = ''
+    [Parameter(Mandatory = $true)]
+    [ValidateSet(0, 1)]
+    [int]$DeleteOriginals,
+    [string]$CustomConfig = '',
+    [string]$SessionId    = ''
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -45,10 +48,6 @@ $ErrorActionPreference = 'Stop'
 
 $settings = Get-ProjectSettings
 Merge-GlobalAvifQuality -Settings $settings
-
-if ($PSBoundParameters.ContainsKey('DeleteOriginal')) {
-    $settings.General.DeleteOriginals = if ($DeleteOriginal) { 1 } else { 0 }
-}
 
 Merge-CustomOverrides -Settings $settings -CustomConfigPath $CustomConfig
 
@@ -360,8 +359,9 @@ $analysisOutput = [PSCustomObject]@{
     Candidates        = @($filteredCandidates)
     AnalysisResults   = $resultsForExport
     Settings          = $settings
-    DeleteOriginals   = [bool]$settings.General.DeleteOriginals
+    DeleteOriginals   = [bool]$DeleteOriginals
     AnalysisThreads   = $parallel.AnalysisThrottle
+    SessionId         = $SessionId
 }
 
 # Write to temp

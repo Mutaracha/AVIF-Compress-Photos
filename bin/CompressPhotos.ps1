@@ -2,6 +2,10 @@
 # Stage 3: Execute encoding plan with parallel processing
 # Reads compress_plan.clixml, encodes files, shows progress, writes logs
 
+param(
+    [string]$SessionId = ''
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -50,6 +54,13 @@ if (-not (Test-Path -LiteralPath $planTempFile)) {
 }
 
 $plan = Import-Clixml -LiteralPath $planTempFile
+
+# Reject a plan created in another session
+if ([string]::IsNullOrEmpty($SessionId) -or [string]$plan.SessionId -ne $SessionId) {
+    Remove-Item -LiteralPath $planTempFile -Force -ErrorAction SilentlyContinue
+    Write-Host '     [!] Encoding plan belongs to another session. Nothing was processed.' -ForegroundColor Red
+    exit 1
+}
 
 # Validate before deleting
 if ($null -eq $plan.Tasks -or $plan.Tasks.Count -eq 0) {

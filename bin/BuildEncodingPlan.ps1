@@ -3,6 +3,10 @@
 # Reads compress_analysis.clixml, outputs compress_plan.clixml
 #Requires -Version 7.0
 
+param(
+    [string]$SessionId = ''
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -45,6 +49,12 @@ if (-not (Test-Path -LiteralPath $analysisTempPath)) {
 
 $analysis = Import-Clixml -LiteralPath $analysisTempPath
 Remove-Item -LiteralPath $analysisTempPath -Force -ErrorAction SilentlyContinue
+
+# Reject analysis results from another session (stale file from an interrupted run)
+if ([string]::IsNullOrEmpty($SessionId) -or [string]$analysis.SessionId -ne $SessionId) {
+    Write-Host '     [!] Analysis results belong to another session. Run the analysis again.' -ForegroundColor Red
+    exit 1
+}
 
 # Unpack
 $mode            = $analysis.Mode
@@ -391,6 +401,7 @@ $plan = [PSCustomObject]@{
     Summary     = $summaryObj
     Tasks       = @($tasks)
     PlanFile    = $planTempFile
+    SessionId   = $SessionId
 }
 
 $plan | Export-Clixml -LiteralPath $planTempFile -Force
