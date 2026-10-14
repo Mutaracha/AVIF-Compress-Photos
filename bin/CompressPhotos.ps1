@@ -76,6 +76,7 @@ Remove-Item -LiteralPath $planTempFile -Force -ErrorAction SilentlyContinue
 # ═══════════════════════════════════════════════════════════════════════
 
 $script:outputReserved = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+Initialize-KillOnCloseJob | Out-Null
 $settings = Get-ProjectSettings
 $parallel = Get-ParallelismSettings -Settings $settings
 $maxParallel = $parallel.EncodingParallel

@@ -298,6 +298,9 @@ function Invoke-AvifFallback {
     $Result.FallbackStep1 = "ffmpeg $($fb.FfmpegArgs -join ' ')"
     $Result.FallbackStep2 = "avifenc $($fb.AvifencArgs -join ' ')"
 
+    # Both steps share one time budget (M-3): the limit applies to the whole fallback
+    $fallbackDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+
     # Step 1: FFmpeg → temp intermediate
     $step1 = Invoke-DirectCommand -Executable 'ffmpeg' -Arguments $fb.FfmpegArgs -TimeoutSec $TimeoutSec
 
@@ -311,7 +314,12 @@ function Invoke-AvifFallback {
     }
 
     # Step 2: avifenc → output
-    $step2 = Invoke-DirectCommand -Executable 'avifenc' -Arguments $fb.AvifencArgs -TimeoutSec $TimeoutSec
+    $step2Timeout = $TimeoutSec
+    if ($TimeoutSec -gt 0) {
+        $remaining = [int][Math]::Ceiling(($fallbackDeadline - [DateTime]::UtcNow).TotalSeconds)
+        $step2Timeout = [Math]::Max(1, $remaining)
+    }
+    $step2 = Invoke-DirectCommand -Executable 'avifenc' -Arguments $fb.AvifencArgs -TimeoutSec $step2Timeout
 
     $null = Remove-ItemSafe -Path $tempIntermediate
 

@@ -89,6 +89,19 @@ else {
 # COLLECT FILES
 # ═══════════════════════════════════════════════════════════════════════
 
+# Recycle Bin check (M-9): without a usable Recycle Bin, originals are kept for this run only.
+# Settings.psd1 is not changed.
+$deleteNote = ''
+if ($DeleteOriginals -eq 1) {
+    $rb = Test-RecycleBinUsable -Path $sourceRoot
+    if (-not $rb.Usable) {
+        $DeleteOriginals = 0
+        $deleteNote = "Originals kept for this run: $($rb.Reason). Settings.psd1 not changed."
+        Write-Host "     [!] $deleteNote" -ForegroundColor Yellow
+        Write-WarningLine -LogFile (Join-Path (Get-LogDir) 'warnings.log') -FilePath $sourceRoot -Reason $deleteNote
+    }
+}
+
 $allSupportedExt = Get-SupportedExtensions
 
 if ($mode -eq 'SingleFile') {
@@ -214,6 +227,13 @@ foreach ($file in $candidates) {
 # ═══════════════════════════════════════════════════════════════════════
 
 $parallel = Get-ParallelismSettings -Settings $settings
+
+# M-10: report corrected settings (values are already fixed in Settings.psd1)
+$warnLogPath = Join-Path (Get-LogDir) 'warnings.log'
+foreach ($w in @($script:ConfigWarnings | Where-Object { $_ })) {
+    Write-Host "     [!] $w" -ForegroundColor Yellow
+    Write-WarningLine -LogFile $warnLogPath -FilePath (Get-SettingsPath) -Reason $w
+}
 
 # Show analysis status
 Write-AnalysisBox -FileCount $candidates.Count -Threads $parallel.AnalysisThrottle
@@ -353,6 +373,7 @@ $analysisOutput = [PSCustomObject]@{
     DeleteOriginals   = [bool]$DeleteOriginals
     AnalysisThreads   = $parallel.AnalysisThrottle
     SessionId         = $SessionId
+    DeleteOriginalsNote = $deleteNote
 }
 
 # Write to temp

@@ -322,3 +322,94 @@ function Move-ToCorruptFolder {
         }
     }
 }
+
+# ─── Recycle Bin check (M-9) ───
+
+if (-not ('AvifRecycleNative.Shell' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+namespace AvifRecycleNative {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SHQUERYRBINFO {
+        public int cbSize;
+        public long i64Size;
+        public long i64NumItems;
+    }
+    public static class Shell {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        public static extern int SHQueryRecycleBin(string pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool GetVolumeNameForVolumeMountPoint(string lpszVolumeMountPoint, StringBuilder lpszVolumeName, uint cchBufferLength);
+    }
+}
+'@
+}
+
+function Get-RecycleNukeFlag {
+    <#
+    .SYNOPSIS
+        True if "Do not move files to the Recycle Bin" is set for the volume.
+        Per-volume NukeOnDelete is used unless the volume uses global settings (then the Global key).
+        Scheme to be verified on Windows.
+    #>
+    param([string]$VolumeGuid)
+
+    $base = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket'
+    $vol  = Get-ItemProperty -LiteralPath (Join-Path $base "Volume\$VolumeGuid") -ErrorAction SilentlyContinue
+    $useGlobal = ($null -eq $vol) -or ($null -eq $vol.UseGlobalSettings) -or ([int]$vol.UseGlobalSettings -ne 0)
+    if (-not $useGlobal -and $null -ne $vol.NukeOnDelete) {
+        return ([int]$vol.NukeOnDelete -ne 0)
+    }
+    $glob = Get-ItemProperty -LiteralPath (Join-Path $base 'Global') -ErrorAction SilentlyContinue
+    if ($null -ne $glob -and $null -ne $glob.NukeOnDelete) {
+        return ([int]$glob.NukeOnDelete -ne 0)
+    }
+    return $false
+}
+
+function Test-RecycleBinUsable {
+    <#
+    .SYNOPSIS
+        Checks that "delete to Recycle Bin" will work for the drive of the source path.
+        1) fixed drive (network and removable drives have no Recycle Bin by default)
+        2) SHQueryRecycleBin succeeds
+        3) the volume does not have "Do not move files to the Recycle Bin"
+        Returns PSCustomObject: Usable (bool), Reason (string).
+    #>
+    param([string]$Path)
+
+    try {
+        $root  = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Path))
+        $drive = New-Object System.IO.DriveInfo($root)
+        if ($drive.DriveType -ne [System.IO.DriveType]::Fixed) {
+            return [PSCustomObject]@{ Usable = $false; Reason = "drive $root is $($drive.DriveType), no Recycle Bin" }
+        }
+
+        $info = New-Object AvifRecycleNative.SHQUERYRBINFO
+        $info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type]'AvifRecycleNative.SHQUERYRBINFO')
+        $hr = [AvifRecycleNative.Shell]::SHQueryRecycleBin($root, [ref]$info)
+        if ($hr -ne 0) {
+            return [PSCustomObject]@{ Usable = $false; Reason = "Recycle Bin is not available on $root" }
+        }
+
+        $sb = New-Object System.Text.StringBuilder 100
+        if (-not [AvifRecycleNative.Shell]::GetVolumeNameForVolumeMountPoint($root, $sb, 100)) {
+            return [PSCustomObject]@{ Usable = $false; Reason = "cannot read volume id of $root" }
+        }
+        $guid = [regex]::Match($sb.ToString(), '\{[0-9A-Fa-f-]+\}').Value
+        if ([string]::IsNullOrEmpty($guid)) {
+            return [PSCustomObject]@{ Usable = $false; Reason = "cannot read volume id of $root" }
+        }
+
+        if (Get-RecycleNukeFlag -VolumeGuid $guid) {
+            return [PSCustomObject]@{ Usable = $false; Reason = "Recycle Bin is turned off for $root (Do not move files to the Recycle Bin)" }
+        }
+
+        return [PSCustomObject]@{ Usable = $true; Reason = '' }
+    }
+    catch {
+        return [PSCustomObject]@{ Usable = $false; Reason = "cannot check Recycle Bin: $($_.Exception.Message)" }
+    }
+}

@@ -385,11 +385,15 @@ else {
     [int]$settings.General.TimeoutSec
 }
 
+# M-3: 0 (no limit) is replaced by 15 minutes; values above 900 are used as set
+if ($timeoutValue -eq 0) { $timeoutValue = 900 }
+
 $planOptions = [PSCustomObject]@{
     MinProcessSizeBytes  = [int64]($settings.General.MinProcessSizeKB * 1KB)
     TimeoutSec           = $timeoutValue
     SingleFileDebugLog   = [bool][int]$settings.General.DebugLogSingleFile
     DeleteOriginals      = $analysis.DeleteOriginals
+    DeleteOriginalsNote  = $analysis.DeleteOriginalsNote
     DebugLogEncodingPlan = [bool][int]$settings.General.DebugLogEncodingPlan
 }
 

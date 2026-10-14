@@ -501,15 +501,22 @@ function Get-ParallelismSettings {
     $cpuThreads = (Get-CimInstance Win32_Processor |
         Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
-    # Read and validate AnalysisThreads
+    # Read and validate AnalysisThreads (M-10: invalid value is corrected in Settings.psd1, process continues)
+    $rawThreads = $Settings.General.AnalysisThreads
     $analysisThreads = 0
     try { $analysisThreads = [int]$Settings.General.AnalysisThreads }
     catch { $analysisThreads = -1 }
 
     if ($analysisThreads -lt 0 -or $analysisThreads -gt $cpuThreads) {
-        $analysisThreads = 0
-        $Settings.General.AnalysisThreads = 0
-        Set-Psd1Value -FilePath (Get-SettingsPath) -Key 'AnalysisThreads' -Value 0
+        $fixed = if ($analysisThreads -lt 0) { 0 } else { [int]$cpuThreads }
+        $why   = if ($analysisThreads -lt 0) { 'negative value' } else { "more than logical processors ($cpuThreads)" }
+        if ($null -eq $script:ConfigWarnings) {
+            $script:ConfigWarnings = [System.Collections.Generic.List[string]]::new()
+        }
+        $script:ConfigWarnings.Add("AnalysisThreads changed: $rawThreads -> $fixed (reason: $why)")
+        $analysisThreads = $fixed
+        $Settings.General.AnalysisThreads = $fixed
+        Set-Psd1Value -FilePath (Get-SettingsPath) -Key 'AnalysisThreads' -Value $fixed
     }
 
     if ($analysisThreads -eq 0) {

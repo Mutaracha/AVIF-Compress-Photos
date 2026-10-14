@@ -579,6 +579,9 @@ function Write-ExecutionHeader {
     Write-BoxValueLine -Label 'Source:'     -Value $Plan.SourceRoot                               -ValueColor White
     Write-BoxValueLine -Label 'Max time:'   -Value "$($Plan.PlanOptions.TimeoutSec) sec per file" -ValueColor White
     Write-BoxValueLine -Label 'Delete src:' -Value $delText                                       -ValueColor White
+    if ($Plan.PlanOptions.DeleteOriginalsNote) {
+        Write-BoxValueLine -Label '  Note:' -Value $Plan.PlanOptions.DeleteOriginalsNote -ValueColor DarkYellow
+    }
     Write-BoxEmpty
     Write-BoxFooter
     Write-Host

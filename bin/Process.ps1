@@ -81,6 +81,86 @@ function Stop-JobProcesses {
 # UNIFIED JOB LAUNCHER
 # ═══════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════
+# KILL-ON-CLOSE JOB OBJECT (M-2)
+# Child processes (cmd, ffmpeg, avifenc) are assigned to a job. When this PowerShell
+# process exits for any reason, Windows closes the job handle and kills the children.
+# ═══════════════════════════════════════════════════════════════════════
+
+if (-not ('AvifJobNative.Job' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace AvifJobNative {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+    public static class Job {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetInformationJobObject(IntPtr hJob, int infoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, uint cbInfo);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+    }
+}
+'@
+}
+
+$script:JobHandle = [IntPtr]::Zero
+
+function Initialize-KillOnCloseJob {
+    if ($script:JobHandle -ne [IntPtr]::Zero) { return $true }
+
+    $h = [AvifJobNative.Job]::CreateJobObject([IntPtr]::Zero, $null)
+    if ($h -eq [IntPtr]::Zero) { return $false }
+
+    $info = New-Object AvifJobNative.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $size = [System.Runtime.InteropServices.Marshal]::SizeOf([type]'AvifJobNative.JOBOBJECT_EXTENDED_LIMIT_INFORMATION')
+    if (-not [AvifJobNative.Job]::SetInformationJobObject($h, 9, [ref]$info, [uint32]$size)) {   # 9 = ExtendedLimitInformation
+        return $false
+    }
+
+    $script:JobHandle = $h
+    return $true
+}
+
+function Add-ProcessToJob {
+    param([System.Diagnostics.Process]$Process)
+
+    if ($script:JobHandle -eq [IntPtr]::Zero -or $null -eq $Process) { return }
+    try { [void][AvifJobNative.Job]::AssignProcessToJobObject($script:JobHandle, $Process.Handle) }
+    catch { }
+}
+
 function Start-ShellJob {
     <#
     .SYNOPSIS
@@ -110,6 +190,7 @@ function Start-ShellJob {
     $psi.CreateNoWindow         = $true
 
     $proc = [System.Diagnostics.Process]::Start($psi)
+    Add-ProcessToJob -Process $proc
 
     return [PSCustomObject]@{
         Process   = $proc
@@ -148,6 +229,7 @@ function Invoke-DirectCommand {
     $psi.CreateNoWindow         = $true
 
     $proc = [System.Diagnostics.Process]::Start($psi)
+    Add-ProcessToJob -Process $proc
 
     # Async stderr to prevent deadlock
     $stderrBuilder = [System.Text.StringBuilder]::new()
