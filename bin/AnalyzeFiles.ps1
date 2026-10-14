@@ -149,17 +149,6 @@ $skipReasons = [ordered]@{
 
 $minSize = $settings.General.MinProcessSizeKB * 1KB
 
-# Base-name map for rerun protection (folder mode only)
-$baseNameMap = @{}
-if ($mode -eq 'Folder') {
-    foreach ($f in $supportedFiles) {
-        $key = '{0}|{1}' -f $f.DirectoryName.ToLowerInvariant(),
-            [System.IO.Path]::GetFileNameWithoutExtension($f.Name).ToLowerInvariant()
-        if (-not $baseNameMap.ContainsKey($key)) { $baseNameMap[$key] = 0 }
-        $baseNameMap[$key]++
-    }
-}
-
 $candidates = [System.Collections.Generic.List[PSObject]]::new()
 
 foreach ($file in $supportedFiles) {
@@ -175,20 +164,11 @@ foreach ($file in $supportedFiles) {
         continue
     }
 
-    # Output exists check (folder mode only)
-    if ($mode -ne 'SingleFile') {
-        $ext = $file.Extension.ToLowerInvariant()
-        $targetExt = if ($ext -eq '.gif') { 'webp' } else { 'avif' }
-        $defaultOut = [System.IO.Path]::ChangeExtension($file.FullName, ".$targetExt")
-
-        $groupKey = '{0}|{1}' -f $file.DirectoryName.ToLowerInvariant(),
-            [System.IO.Path]::GetFileNameWithoutExtension($file.Name).ToLowerInvariant()
-        $sameBaseCount = if ($baseNameMap.ContainsKey($groupKey)) { $baseNameMap[$groupKey] } else { 1 }
-
-        if ([System.IO.File]::Exists($defaultOut) -and $sameBaseCount -le 1) {
-            $skipReasons['OutputExists']++
-            continue
-        }
+    # Already converted (no-delete mode only): manifest entry with the same name, size and time,
+    # and its output still on disk. An existing .avif without an entry is foreign: it gets a suffix.
+    if ($DeleteOriginals -eq 0 -and (Test-AlreadyDone -File $file)) {
+        $skipReasons['OutputExists']++
+        continue
     }
 
     $candidates.Add($file)

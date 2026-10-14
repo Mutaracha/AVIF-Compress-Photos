@@ -18,6 +18,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 . "$PSScriptRoot\UI.ps1"
 . "$PSScriptRoot\Logging.ps1"
 . "$PSScriptRoot\ImageProbe.ps1"
+. "$PSScriptRoot\FileOps.ps1"
 
 # ═══════════════════════════════════════════════════════════════════════
 # ERROR HANDLER
@@ -359,6 +360,18 @@ foreach ($file in $candidates) {
         $tasks.Add($task)
         continue
     }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# RESERVE OUTPUT NAMES (H-2): base.ext, base_1.ext, ... in path order
+# ═══════════════════════════════════════════════════════════════════════
+
+$reserved = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($t in @($tasks | Sort-Object { $_.SourcePath.ToLowerInvariant() })) {
+    $outPath = Find-FreeOutputPath -Dir ([System.IO.Path]::GetDirectoryName($t.SourcePath)) `
+        -BaseName ([System.IO.Path]::GetFileNameWithoutExtension($t.SourcePath)) `
+        -TargetExt $t.TargetExtension -Reserved $reserved -SourcePath $t.SourcePath
+    $t | Add-Member -NotePropertyName OutputPath -NotePropertyValue $outPath -Force
 }
 
 # ═══════════════════════════════════════════════════════════════════════

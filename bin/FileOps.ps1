@@ -154,35 +154,109 @@ function Rename-TempToFinal {
     }
 }
 
-# ─── Output Path ───
+# ─── Output Path (H-2) ───
 
-function Get-UniqueOutputPath {
+function Find-FreeOutputPath {
     <#
     .SYNOPSIS
-        Generates a unique output path, avoiding collisions.
-        Falls back to GUID suffix after 100 attempts.
+        First free output name in order: base.ext, base_1.ext, base_2.ext, ...
+        A name is free when it is not on disk, not reserved by the current plan,
+        and is not the source file itself.
     #>
     param(
-        [string]$SourceFile,
-        [string]$TargetExt
+        [string]$Dir,
+        [string]$BaseName,
+        [string]$TargetExt,
+        [System.Collections.Generic.HashSet[string]]$Reserved,
+        [string]$SourcePath
     )
 
-    $dir  = [System.IO.Path]::GetDirectoryName($SourceFile)
-    $name = [System.IO.Path]::GetFileNameWithoutExtension($SourceFile)
+    $srcFull = [System.IO.Path]::GetFullPath($SourcePath)
+    for ($i = 0; $i -lt 10000; $i++) {
+        if ($i -eq 0) { $name = $BaseName + '.' + $TargetExt }
+        else          { $name = $BaseName + '_' + $i + '.' + $TargetExt }
+        $path = [System.IO.Path]::Combine($Dir, $name)
+        if ($path -ieq $srcFull) { continue }
+        if ($Reserved.Contains($path)) { continue }
+        if ([System.IO.File]::Exists($path)) { continue }
+        [void]$Reserved.Add($path)
+        return $path
+    }
+    throw "No free output name for '$BaseName' in '$Dir'."
+}
 
-    $outFile = [System.IO.Path]::Combine($dir, "$name.$TargetExt")
-    if (-not [System.IO.File]::Exists($outFile)) { return $outFile }
+# ─── Done manifest (no-delete mode only, H-2) ───
+# File .avifcompress_done.txt in the source folder. One line per converted source:
+# name <TAB> size <TAB> LastWriteTimeUtc ticks <TAB> output name <TAB> date <TAB> SessionId
 
-    $counter = 1
-    while ($true) {
-        $outFile = [System.IO.Path]::Combine($dir, "${name}_${counter}.$TargetExt")
-        if (-not [System.IO.File]::Exists($outFile)) { return $outFile }
-        $counter++
-        if ($counter -gt 100) {
-            $guid = [Guid]::NewGuid().ToString('N').Substring(0, 8)
-            return [System.IO.Path]::Combine($dir, "${name}_${guid}.$TargetExt")
+$script:DoneManifestName = '.avifcompress_done.txt'
+$script:doneCache = @{}
+
+function Get-DoneManifestEntries {
+    param([string]$Dir)
+
+    $key = $Dir.ToLowerInvariant()
+    if ($script:doneCache.ContainsKey($key)) { return $script:doneCache[$key] }
+
+    $list = [System.Collections.Generic.List[PSObject]]::new()
+    $path = [System.IO.Path]::Combine($Dir, $script:DoneManifestName)
+    if ([System.IO.File]::Exists($path)) {
+        foreach ($line in [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::UTF8)) {
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+            $parts = $line -split "`t"
+            if ($parts.Count -lt 4) { continue }
+            $size = [int64]0; $ticks = [int64]0
+            if (-not ([int64]::TryParse($parts[1], [ref]$size) -and [int64]::TryParse($parts[2], [ref]$ticks))) { continue }
+            $list.Add([PSCustomObject]@{ Name = $parts[0]; Size = $size; Ticks = $ticks; Output = $parts[3] })
         }
     }
+    $script:doneCache[$key] = $list
+    return $list
+}
+
+function Test-AlreadyDone {
+    <#
+    .SYNOPSIS
+        True if the manifest has this source (same name, size, time) and its output is still on disk.
+        A source with no entry, or with a changed size/time, is treated as not done.
+    #>
+    param([System.IO.FileInfo]$File)
+
+    $dir = $File.DirectoryName
+    foreach ($e in (Get-DoneManifestEntries -Dir $dir)) {
+        if ($e.Name -ieq $File.Name -and $e.Size -eq $File.Length -and $e.Ticks -eq $File.LastWriteTimeUtc.Ticks) {
+            if ([System.IO.File]::Exists([System.IO.Path]::Combine($dir, $e.Output))) { return $true }
+        }
+    }
+    return $false
+}
+
+function Add-DoneRecord {
+    param(
+        [string]$SourcePath,
+        [int64]$SizeBytes,
+        [datetime]$LastWriteTimeUtc,
+        [string]$OutputPath,
+        [string]$SessionId
+    )
+
+    $dir  = [System.IO.Path]::GetDirectoryName($SourcePath)
+    $path = [System.IO.Path]::Combine($dir, $script:DoneManifestName)
+    $sb = [System.Text.StringBuilder]::new()
+    if (-not [System.IO.File]::Exists($path)) {
+        [void]$sb.Append("# AVIF Compressor: sources converted in this folder. Do not edit.`r`n")
+    }
+    $line = @(
+        [System.IO.Path]::GetFileName($SourcePath),
+        $SizeBytes,
+        $LastWriteTimeUtc.Ticks,
+        [System.IO.Path]::GetFileName($OutputPath),
+        (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
+        $SessionId
+    ) -join "`t"
+    [void]$sb.Append($line + "`r`n")
+    [System.IO.File]::AppendAllText($path, $sb.ToString(), [System.Text.UTF8Encoding]::new($false))
+    $script:doneCache.Remove($dir.ToLowerInvariant())
 }
 
 # ─── Output Validation ───

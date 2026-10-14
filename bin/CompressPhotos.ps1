@@ -75,6 +75,7 @@ Remove-Item -LiteralPath $planTempFile -Force -ErrorAction SilentlyContinue
 # RUNTIME SETUP
 # ═══════════════════════════════════════════════════════════════════════
 
+$script:outputReserved = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $settings = Get-ProjectSettings
 $parallel = Get-ParallelismSettings -Settings $settings
 $maxParallel = $parallel.EncodingParallel
@@ -163,6 +164,14 @@ function Test-TaskReady {
     #>
     param([PSCustomObject]$Task)
 
+    # Output name is reserved in the plan. Plans made before H-2 have none: reserve one now.
+    if (-not $Task.OutputPath) {
+        $fallbackOut = Find-FreeOutputPath -Dir ([System.IO.Path]::GetDirectoryName($Task.SourcePath)) `
+            -BaseName ([System.IO.Path]::GetFileNameWithoutExtension($Task.SourcePath)) `
+            -TargetExt $Task.TargetExtension -Reserved $script:outputReserved -SourcePath $Task.SourcePath
+        $Task | Add-Member -NotePropertyName OutputPath -NotePropertyValue $fallbackOut -Force
+    }
+
     if (-not [System.IO.File]::Exists($Task.SourcePath)) {
         $script:skipCount++
         $script:processed++
@@ -193,6 +202,18 @@ function Test-TaskReady {
         Ensure-RunLog
         Write-WarningTaskEntry -LogFile $script:runLog -Task $Task `
             -Reason "Cannot read source file: $($_.Exception.Message)" `
+            -IsSingleFile $isSingleMode
+        $script:hasWarnings = $true
+        return $false
+    }
+
+    # Never overwrite a file that appeared at the reserved output name after the plan was built
+    if ([System.IO.File]::Exists($Task.OutputPath)) {
+        $script:skipCount++
+        $script:processed++
+        Ensure-RunLog
+        Write-WarningTaskEntry -LogFile $script:runLog -Task $Task `
+            -Reason 'Output file appeared after plan was built (OutputCollision).' `
             -IsSingleFile $isSingleMode
         $script:hasWarnings = $true
         return $false
@@ -278,6 +299,18 @@ function Register-Success {
     Update-FormatStats -Extension $ext -Outcome 'Success' `
         -OriginalSize $Task.SizeBytes -NewSize $newSize
 
+    # No-delete mode: record the converted source in the folder manifest (H-2).
+    # A failed write only means the file may be converted again next run.
+    if (-not $plan.PlanOptions.DeleteOriginals) {
+        try {
+            Add-DoneRecord -SourcePath $Task.SourcePath -SizeBytes $Task.SizeBytes `
+                -LastWriteTimeUtc $Task.LastWriteTimeUtc -OutputPath $OutputPath -SessionId $plan.SessionId
+        }
+        catch {
+            $script:hasWarnings = $true
+        }
+    }
+
     # Delete original after confirmed success
     if ($plan.PlanOptions.DeleteOriginals) {
         Remove-ToRecycleBin -Path $Task.SourcePath
@@ -344,7 +377,7 @@ function Start-NextTask {
 
         if (-not (Test-TaskReady -Task $task)) { continue }
 
-        $outFile = Get-UniqueOutputPath -SourceFile $task.SourcePath -TargetExt $task.TargetExtension
+        $outFile = $task.OutputPath
 
         # Get stderr slot
         $slot = $null
