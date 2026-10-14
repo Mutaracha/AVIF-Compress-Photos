@@ -336,11 +336,16 @@ ffmpeg -v error -i output.avif -vf alphaextract -frames:v 1 alpha_check.png
 - pwsh: ссылка на страницу, сообщение о перезапуске консоли, пауза.
 
 Используемые ссылки (для проверки):
-- **ffmpeg** (gyan.dev): `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z` и `…/ffmpeg-release-essentials.zip` (текущий скрипт сначала пробует .7z, потом .zip). Хеш-файла не видно, нужно проверить на сайте.
+- **ffmpeg** (gyan.dev, данные пользователя; текущая версия 9.0.2, последняя сборка 2026-10-12):
+  - версия: `https://www.gyan.dev/ffmpeg/builds/release-version` → `9.0.2`;
+  - дата: `https://www.gyan.dev/ffmpeg/builds/last-build-update` → `2026-10-12`;
+  - архив 7z: `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z`, SHA-256 (`…7z.sha256`): `4705843ccaaf54257c16ad90f3e952ece33c17df964ecf7bfdbb0f49c7171077`;
+  - архив zip: `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip`, SHA-256 (`…zip.sha256`): `60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`.
+  - Installer берёт хеш из `.sha256`-файла; значения выше — для тестов. Текущий скрипт сначала пробует .7z, потом .zip.
 - **avifenc** (libavif): `https://api.github.com/repos/AOMediaCodec/libavif/releases/latest` — будет заменён на `https://github.com/AOMediaCodec/libavif/releases/latest` (302 на тег), список релизов: `https://github.com/AOMediaCodec/libavif/releases.atom`. Архив: `https://github.com/AOMediaCodec/libavif/releases/download/<тег>/windows-artifacts.zip`.
-- **gif2webp** (libwebp): `https://storage.googleapis.com/downloads.webmproject.org/releases/webp/index.html` (список версий, поиск `libwebp-<версия>-windows-x64.zip`), архивы в `https://storage.googleapis.com/downloads.webmproject.org/releases/webp/`. Альтернатива: `https://github.com/webmproject/libwebp/releases.atom` (не проверено).
+- **gif2webp** (libwebp, данные пользователя): последний релиз `1.6.0` (2025-07-09T22:55:36Z), файл `libwebp-1.6.0-windows-x64.zip`. Одинаково в `https://github.com/webmproject/libwebp/releases.atom` и `https://storage.googleapis.com/downloads.webmproject.org/releases/webp/index.html`. Installer может брать версию из atom-ленты (проверка даты), архив — из storage.googleapis.com.
 
-Ограничение: из песочницы gyan.dev и storage.googleapis недоступны, поэтому я не могу проверить разбор их страниц. Проверку формата сделайте на тестовой машине.
+Ограничение: из песочницы gyan.dev и storage.googleapis недоступны; данные выше получены пользователем, проверку формата разбора делаем на тестовой машине.
 
 ### M-11: выполнено
 - `gitignore.txt` переименован в `.gitignore`; добавлены `installers/state.psd1` (ко всем прочим правилам `arch/`, `logs/`, `tools/`).
